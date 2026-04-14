@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AuctionAdda 🏏</title>
+  <link rel="stylesheet" href="src/style.css"/>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div id="app-loading" style="position:fixed;inset:0;background:#0a1628;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:16px">
+    <div style="width:56px;height:56px;background:#1D9E75;border-radius:14px;display:flex;align-items:center;justify-content:center">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/><path d="M17 6L7 16"/></svg>
+    </div>
+    <div style="color:#fff;font-size:20px;font-weight:700">AuctionAdda</div>
+    <div style="display:flex;gap:6px">
+      <div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:ldot 1.2s ease-in-out infinite"></div>
+      <div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:ldot 1.2s ease-in-out .2s infinite"></div>
+      <div style="width:8px;height:8px;border-radius:50%;background:#1D9E75;animation:ldot 1.2s ease-in-out .4s infinite"></div>
+    </div>
+  </div>
+  <style>@keyframes ldot{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}</style>
+  <div id="root"></div>
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal" id="modal-box"></div>
+  </div>
+  <script src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection — anyone can read/write (app has its own auth layer)
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+    // Tournaments — anyone can read/write
+    match /tournaments/{tourId} {
+      allow read, write: if true;
+    }
+  }
+}
