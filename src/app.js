@@ -146,7 +146,7 @@ const vv       = id => { const el = document.getElementById(id); return el ? el.
 const initials = name => name.split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase() || '?';
 
 const currentUser       = () => state.users.find(u => u.id === state.currentUserId) || null;
-const isAdmin           = () => { const u = currentUser(); return u && u.role === 'admin' && u.adminPaidUntil > Date.now(); };
+const isAdmin           = () => { const u = currentUser(); return u && u.role === 'admin'; };
 const currentTournament = () => state.tournaments.find(t => t.id === state.currentTournamentId) || null;
 const getTour     = id => state.tournaments.find(t => t.id === id);
 const getTeam     = id => { const t = currentTournament(); return t ? (t.teams||[]).find(x=>x.id===id) : null; };
@@ -192,24 +192,41 @@ let statsOpenUsers = new Set();
 let statsCache = {};
 let pollTimer = null;
 
-// ── Check URL for team token ──────────────────────────────
+// ── Check URL for team token or viewer token ──────────────
 function getUrlTeamToken() {
   const params = new URLSearchParams(window.location.search);
   return params.get('team') || null;
+}
+function getUrlViewToken() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get('view') || null;
 }
 
 // ══════════════════════════════════════════════════════════
 //  MASTER RENDER
 // ══════════════════════════════════════════════════════════
 function render() {
-  stopAllListeners(); // stop any active listeners before re-evaluating route
+  stopAllListeners();
   const root = document.getElementById('root'); if (!root) return;
+
+  // Public viewer link — ?view=TOURNAMENT_ID, no login required
+  const viewToken = getUrlViewToken();
+  if (viewToken) {
+    const viewTour = state.tournaments.find(t => t.id === viewToken);
+    root.innerHTML = renderPublicViewer(viewToken);
+    if (viewTour) {
+      listenToTournament(viewToken, () => {
+        const r = document.getElementById('root');
+        if (r) r.innerHTML = renderPublicViewer(viewToken);
+      });
+    }
+    return;
+  }
 
   // Team bidding link — ?team=TOKEN, no login required
   const teamToken = getUrlTeamToken();
   if (teamToken) {
     root.innerHTML = renderTeamBidPage(teamToken);
-    // Find which tournament this team belongs to and listen to it
     const teamTour = state.tournaments.find(t => (t.teams||[]).find(tm => (tm.bidToken||'').trim() === teamToken.trim()));
     if (teamTour) {
       listenToTournament(teamTour.id, () => {
@@ -224,25 +241,6 @@ function render() {
   if (!u) {
     if (currentPage === 'signup') { root.innerHTML = renderSignup(); return; }
     root.innerHTML = renderLogin();
-    return;
-  }
-
-  if (currentPage === 'payment') { root.innerHTML = renderPayment(); return; }
-
-  if (u.role === 'viewer') {
-    if (currentPage === 'view-live' && state.currentTournamentId) {
-      root.innerHTML = renderViewerWrapper();
-      listenToTournament(state.currentTournamentId, () => {
-        const r = document.getElementById('root');
-        if (r) r.innerHTML = renderViewerWrapper();
-      });
-    } else {
-      root.innerHTML = renderViewerLanding();
-      listenToAllTournaments(() => {
-        const r = document.getElementById('root');
-        if (r && currentPage !== 'view-live') r.innerHTML = renderViewerLanding();
-      });
-    }
     return;
   }
 
@@ -297,148 +295,51 @@ function startTeamBidPoll() {}
 function clearPoll() { stopAllListeners(); }
 
 // ══════════════════════════════════════════════════════════
-//  AUTH — LOGIN (fancy two-column)
+//  AUTH — LOGIN (admin only, cricket-themed)
 // ══════════════════════════════════════════════════════════
-let loginMode = 'admin'; // 'admin' or 'viewer'
-
 function renderLogin() {
   return `
   <div class="auth-page">
-    <!-- Left: auction illustration -->
     <div class="auth-left">
-      <div class="auth-illustration">
-        <svg viewBox="0 0 420 380" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:380px;margin:0 auto;display:block">
-          <!-- Auction table -->
-          <rect x="40" y="260" width="340" height="18" rx="9" fill="#0a4a35" opacity=".9"/>
-          <rect x="60" y="278" width="300" height="60" rx="8" fill="#0a4a35" opacity=".6"/>
-          <!-- Table surface gloss -->
-          <rect x="40" y="260" width="340" height="8" rx="4" fill="rgba(255,255,255,.12)"/>
-
-          <!-- Podium/stand -->
-          <rect x="165" y="200" width="90" height="62" rx="6" fill="#0d5c40" opacity=".85"/>
-          <rect x="155" y="196" width="110" height="12" rx="6" fill="#1D9E75" opacity=".9"/>
-
-          <!-- Auctioneer silhouette -->
-          <!-- Body -->
-          <rect x="188" y="120" width="44" height="78" rx="10" fill="#1a6b50"/>
-          <!-- Head -->
-          <circle cx="210" cy="104" r="22" fill="#2d8f68"/>
-          <!-- Arms -->
-          <rect x="158" y="130" width="30" height="14" rx="7" fill="#1a6b50" transform="rotate(-30 173 137)"/>
-          <rect x="232" y="118" width="42" height="14" rx="7" fill="#1a6b50" transform="rotate(-55 253 125)"/>
-
-          <!-- HAMMER -->
-          <!-- Handle -->
-          <rect x="258" y="86" width="9" height="70" rx="4" fill="#c8a96e" transform="rotate(-45 262 121)"/>
-          <!-- Head -->
-          <rect x="240" y="68" width="44" height="22" rx="7" fill="#d4b483" transform="rotate(-45 262 79)"/>
-          <rect x="244" y="72" width="36" height="14" rx="4" fill="#e8cc9a" transform="rotate(-45 262 79)"/>
-
-          <!-- Impact lines (hammer swing) -->
-          <line x1="268" y1="82" x2="285" y2="65" stroke="rgba(255,255,255,.5)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="4 4"/>
-          <line x1="278" y1="90" x2="298" y2="80" stroke="rgba(255,255,255,.4)" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 4"/>
-          <line x1="272" y1="72" x2="288" y2="56" stroke="rgba(255,255,255,.3)" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 5"/>
-
-          <!-- Bid paddles (audience) -->
-          <!-- Left person -->
-          <circle cx="98" cy="226" r="18" fill="#1a6b50" opacity=".7"/>
-          <rect x="84" y="240" width="28" height="22" rx="5" fill="#1a6b50" opacity=".6"/>
-          <!-- Paddle up -->
-          <rect x="110" y="195" width="8" height="34" rx="4" fill="#d4b483" opacity=".9"/>
-          <ellipse cx="114" cy="190" rx="14" ry="10" fill="#e8cc9a" opacity=".9"/>
-          <text x="114" y="194" text-anchor="middle" font-size="9" font-weight="700" fill="#0a4a35">BID</text>
-
-          <!-- Right person -->
-          <circle cx="322" cy="226" r="18" fill="#1a6b50" opacity=".7"/>
-          <rect x="308" y="240" width="28" height="22" rx="5" fill="#1a6b50" opacity=".6"/>
-          <!-- Paddle down -->
-          <rect x="316" y="205" width="8" height="30" rx="4" fill="#c8a96e" opacity=".6"/>
-          <ellipse cx="320" cy="238" rx="13" ry="9" fill="#d4b483" opacity=".5"/>
-
-          <!-- Middle audience -->
-          <circle cx="180" cy="232" r="14" fill="#1a6b50" opacity=".5"/>
-          <circle cx="240" cy="230" r="14" fill="#1a6b50" opacity=".5"/>
-
-          <!-- Price tags floating -->
-          <rect x="58" y="140" width="80" height="32" rx="8" fill="rgba(255,255,255,.15)" stroke="rgba(255,255,255,.3)" stroke-width="1"/>
-          <text x="98" y="151" text-anchor="middle" font-size="9" fill="rgba(255,255,255,.7)" font-family="sans-serif">CURRENT BID</text>
-          <text x="98" y="163" text-anchor="middle" font-size="12" font-weight="700" fill="#fff" font-family="sans-serif">₹12,50,000</text>
-
-          <rect x="282" y="148" width="80" height="28" rx="8" fill="rgba(255,255,255,.1)" stroke="rgba(255,255,255,.2)" stroke-width="1"/>
-          <text x="322" y="159" text-anchor="middle" font-size="9" fill="rgba(255,255,255,.6)" font-family="sans-serif">SOLD TO</text>
-          <text x="322" y="170" text-anchor="middle" font-size="11" font-weight="600" fill="rgba(255,255,255,.9)" font-family="sans-serif">MI 🏆</text>
-
-          <!-- Stars/sparkles -->
-          <circle cx="142" cy="100" r="3" fill="rgba(255,255,255,.6)"/>
-          <circle cx="340" cy="118" r="2.5" fill="rgba(255,255,255,.5)"/>
-          <circle cx="80" cy="175" r="2" fill="rgba(255,255,255,.4)"/>
-          <circle cx="370" cy="185" r="3" fill="rgba(255,255,255,.5)"/>
-          <circle cx="200" cy="60" r="2" fill="rgba(255,255,255,.4)"/>
-          <circle cx="300" cy="75" r="2.5" fill="rgba(255,255,255,.45)"/>
-
-          <!-- Cricket ball -->
-          <circle cx="130" cy="62" r="18" fill="#c0392b" opacity=".8"/>
-          <path d="M115 58 Q130 50 145 58" stroke="rgba(255,255,255,.5)" stroke-width="1.5" fill="none"/>
-          <path d="M115 66 Q130 74 145 66" stroke="rgba(255,255,255,.5)" stroke-width="1.5" fill="none"/>
-        </svg>
-      </div>
-      <div class="auth-hero-title">
-        <h2>Where champions<br/>get their price</h2>
-        <p>Run professional cricket player auctions with live team bidding, real-time stats, and instant results.</p>
-      </div>
-      <div class="auth-hero-stat">
-        <div><div class="stat-n">Live</div><div class="stat-l">Bidding</div></div>
-        <div><div class="stat-n">∞</div><div class="stat-l">Tournaments</div></div>
-        <div><div class="stat-n">PDF</div><div class="stat-l">Reports</div></div>
+      <div class="auth-left-content">
+        <div class="auth-cricket-grid">
+          ${['🏏','👑','🏆','⭐','🎖️','🦁','🔥','🌟','🏅','💥','🎯','🎳'].map(e=>`<div class="cricket-emoji-tile">${e}</div>`).join('')}
+        </div>
+        <div class="auth-left-overlay">
+          <div class="auth-brand-mark">🏏</div>
+          <h2>AuctionAdda</h2>
+          <p>Run live cricket auctions with real-time bidding, team management, and instant results.</p>
+          <div class="auth-feature-list">
+            <div class="auth-feature">⚡ Real-time bidding via shared links</div>
+            <div class="auth-feature">📊 CricHeroes player stats & profiles</div>
+            <div class="auth-feature">🏆 Auto-generated PDF squad reports</div>
+            <div class="auth-feature">👁️ Public viewer links — share with anyone</div>
+          </div>
+        </div>
       </div>
     </div>
-
-    <!-- Right: form -->
     <div class="auth-right">
       <div class="auth-card">
         <div class="auth-logo">
-          <div class="logo-mark">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/><path d="M17 6L7 16"/></svg>
-          </div>
-          <h1 style="font-size:20px;font-weight:700">AuctionAdda</h1>
+          <div class="logo-mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/><path d="M17 6L7 16"/></svg></div>
+          <h1 style="font-size:22px;font-weight:700">AuctionAdda</h1>
         </div>
-
-        <div class="auth-title">Sign in</div>
-        <div class="auth-subtitle">Choose your role to continue</div>
-
-        <div class="login-tabs">
-          <div class="login-tab ${loginMode==='admin'?'active':''}" onclick="setLoginMode('admin')">🛡️ Admin</div>
-          <div class="login-tab ${loginMode==='viewer'?'active':''}" onclick="setLoginMode('viewer')">👁️ Viewer</div>
-        </div>
-
-        ${loginMode === 'admin' ? `
-        <div class="form-row"><label>Phone number</label>
-          <input id="l-phone" placeholder="10-digit mobile number" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" onkeydown="if(event.key==='Enter')doLogin()"/>
-        </div>
-        <div class="form-row" style="margin-bottom:6px"><label>Password</label>
-          <input id="l-pass" type="password" placeholder="Your password" onkeydown="if(event.key==='Enter')doLogin()"/>
-        </div>
+        <div class="auth-title">Admin sign in</div>
+        <div class="auth-subtitle">Manage your cricket auction tournaments</div>
+        <div class="form-row"><label>Phone number</label><input id="l-phone" placeholder="10-digit number" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" autocomplete="username"/></div>
+        <div class="form-row"><label>Password</label><input id="l-pass" type="password" placeholder="Your password" autocomplete="current-password"/></div>
         <div id="l-err" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
-        <button class="btn btn-primary btn-full btn-lg" onclick="doLogin()">Sign in as Admin</button>
-        <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:20px">
-          New here? <span class="auth-link" onclick="currentPage='signup';render()">Create admin account</span>
+        <button class="btn btn-primary btn-full btn-lg" onclick="doLogin()">Sign in →</button>
+        <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:16px">
+          No account? <span class="auth-link" onclick="currentPage='signup';render()">Create one</span>
         </div>
-        ` : `
-        <div style="background:var(--blue-light);border-radius:10px;padding:14px;font-size:13px;color:var(--blue);margin-bottom:16px;line-height:1.6;border:1px solid rgba(55,138,221,.15)">
-          <b>Viewer access:</b> Enter your phone number. You'll get access if your number is registered as a player in any active auction.
+        <div style="margin-top:24px;padding:14px;background:var(--blue-light);border-radius:var(--radius-sm);font-size:12px;color:var(--blue);line-height:1.6">
+          👁️ <b>Viewers</b> don't need to log in — share the viewer link from the Setup page with anyone.
         </div>
-        <div class="form-row"><label>Your phone number</label>
-          <input id="l-viewer-phone" placeholder="10-digit mobile number" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)" onkeydown="if(event.key==='Enter')doViewerLogin()"/>
-        </div>
-        <div id="l-viewer-err" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
-        <button class="btn btn-blue btn-full btn-lg" onclick="doViewerLogin()">Access as Viewer</button>
-        `}
       </div>
     </div>
   </div>`;
 }
-
-window.setLoginMode = function(mode) { loginMode = mode; render(); };
 
 window.doLogin = function() {
   const phone = vv('l-phone').trim(), pass = vv('l-pass').trim();
@@ -448,54 +349,6 @@ window.doLogin = function() {
   if (!user) { showErr(err, 'Phone number or password is incorrect.'); return; }
   state.currentUserId = user.id;
   currentPage = 'home'; save(); render();
-};
-
-window.doViewerLogin = function() {
-  // state is always current via Firestore listeners; no manual load() needed
-  const raw  = vv('l-viewer-phone').trim();
-  const err  = document.getElementById('l-viewer-err');
-  if (!raw) { showErr(err, 'Enter your 10-digit phone number.'); return; }
-
-  // Strip any +91 prefix the user might type
-  const phone = raw.replace(/^\+?91/, '').replace(/[^0-9]/g, '');
-  if (phone.length < 10) { showErr(err, 'Enter a valid 10-digit phone number.'); return; }
-  const phone10 = phone.slice(-10); // take last 10 digits
-
-  // Search every tournament for a player with matching phone
-  let foundTour = null, foundPlayer = null;
-  for (const t of state.tournaments) {
-    const p = (t.players||[]).find(p => {
-      if (!p.phone) return false;
-      const stored = p.phone.replace(/[^0-9]/g, '').slice(-10);
-      return stored === phone10;
-    });
-    if (p) { foundTour = t; foundPlayer = p; break; }
-  }
-
-  if (!foundTour) {
-    // Check if there are any players with phones at all (help diagnose)
-    const totalWithPhone = state.tournaments.reduce((sum, t) =>
-      sum + (t.players||[]).filter(p => p.phone).length, 0);
-    const totalPlayers = state.tournaments.reduce((sum, t) =>
-      sum + (t.players||[]).length, 0);
-    showErr(err,
-      `Phone number not found as a registered player. ` +
-      `(${totalWithPhone} of ${totalPlayers} players have phone numbers stored. ` +
-      `Ask your admin to edit your player record and add your phone number.)`
-    );
-    return;
-  }
-
-  // Create or reuse viewer session
-  let viewerUser = state.users.find(u => u.phone === phone10 && u.role === 'viewer');
-  if (!viewerUser) {
-    viewerUser = { id: uid(), name: foundPlayer.name, phone: phone10, role: 'viewer', adminPaidUntil: 0 };
-    state.users.push(viewerUser);
-  }
-  state.currentUserId = viewerUser.id;
-  state.currentTournamentId = foundTour.id;
-  currentPage = 'view-live';
-  save(); render();
 };
 
 // ── Signup (admin only) ───────────────────────────────────
@@ -517,7 +370,7 @@ function renderSignup() {
           <h1 style="font-size:20px;font-weight:700">AuctionAdda</h1>
         </div>
         <div class="auth-title">Create admin account</div>
-        <div class="auth-subtitle">Admin subscription is ₹500/year after signup</div>
+        <div class="auth-subtitle">Set up your auction admin account</div>
         <div class="grid-2">
           <div class="form-row"><label>Full name</label><input id="s-name" placeholder="Your name"/></div>
           <div class="form-row"><label>Phone number</label><input id="s-phone" placeholder="10 digits" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)"/></div>
@@ -525,7 +378,7 @@ function renderSignup() {
         <div class="form-row"><label>Email address</label><input id="s-email" type="email" placeholder="you@example.com"/></div>
         <div class="form-row"><label>Password</label><input id="s-pass" type="password" placeholder="Create a password"/></div>
         <div id="s-err" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
-        <button class="btn btn-primary btn-full btn-lg" onclick="doSignup()" style="margin-top:4px">Continue to payment →</button>
+        <button class="btn btn-primary btn-full btn-lg" onclick="doSignup()" style="margin-top:4px">Create account →</button>
         <div style="text-align:center;font-size:13px;color:var(--muted);margin-top:16px">
           Already have an account? <span class="auth-link" onclick="currentPage='login';render()">Sign in</span>
         </div>
@@ -540,314 +393,249 @@ window.doSignup = function() {
   if (!name||!phone||!email||!pass) { showErr(err,'Please fill in all fields.'); return; }
   if (phone.length<10) { showErr(err,'Enter a valid 10-digit phone number.'); return; }
   if (state.users.find(u=>u.phone===phone)) { showErr(err,'An account with this phone already exists.'); return; }
-  const newUser = { id:uid(), name, phone, email, password:pass, role:'admin', adminPaidUntil:0 };
+  const newUser = { id:uid(), name, phone, email, password:pass, role:'admin' };
   state.users.push(newUser); state.currentUserId=newUser.id;
-  save(); currentPage='payment'; render();
-};
-
-// ── Payment ───────────────────────────────────────────────
-function renderPayment() {
-  const u = currentUser(), isPaid = u && u.adminPaidUntil > Date.now();
-  return `
-  <div class="auth-page" style="display:flex;align-items:center;justify-content:center;background:var(--bg);min-height:100vh">
-    <div class="auth-card" style="max-width:440px;width:100%;background:var(--card-bg);border-radius:16px;padding:36px;box-shadow:0 8px 40px rgba(0,0,0,.1)">
-      <div class="auth-logo" style="justify-content:center;margin-bottom:20px">
-        <div class="logo-mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/></svg></div>
-        <h1 style="font-size:20px;font-weight:700">Admin Access</h1>
-      </div>
-      ${isPaid ? `
-        <div class="info-banner">✓ Active admin — valid until ${new Date(u.adminPaidUntil).toLocaleDateString('en-IN')}.</div>
-        <button class="btn btn-primary btn-full" onclick="currentPage='home';render()">Go to home →</button>
-      ` : `
-        <div class="payment-amount">₹500</div>
-        <div class="payment-period">Per year &bull; Unlimited tournaments</div>
-        <div style="margin-bottom:20px">
-          ${['Unlimited tournaments','Manage teams & players','Live auctions with team bidding links','PDF squad reports','CricHeroes player lookup'].map(f=>`<div class="payment-feature"><span class="payment-check">✓</span>${f}</div>`).join('')}
-        </div>
-        <div class="form-row"><label>Card number</label><input placeholder="4242 4242 4242 4242" maxlength="19" oninput="fmtCard(this)"/></div>
-        <div class="grid-2">
-          <div class="form-row"><label>Expiry</label><input id="p-exp" placeholder="MM / YY" maxlength="7"/></div>
-          <div class="form-row"><label>CVV</label><input id="p-cvv" placeholder="123" maxlength="3" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/></div>
-        </div>
-        <div class="form-row"><label>Name on card</label><input id="p-name" placeholder="Full name"/></div>
-        <div id="p-err" style="color:var(--red);font-size:13px;margin-bottom:12px;display:none"></div>
-        <button class="btn btn-primary btn-full btn-lg" onclick="doPayment()">Pay ₹500 →</button>
-        <div style="text-align:center;font-size:11px;color:var(--muted);margin-top:12px">🔒 Demo — no real payment</div>
-      `}
-      <div style="text-align:center;margin-top:16px"><span class="auth-link" onclick="doLogout()">Sign out</span></div>
-    </div>
-  </div>`;
-}
-window.fmtCard = el => { let v=el.value.replace(/\D/g,'').slice(0,16); el.value=v.replace(/(.{4})/g,'$1 ').trim(); };
-window.doPayment = function() {
-  const err=document.getElementById('p-err');
-  const card=document.querySelector('input[placeholder="4242 4242 4242 4242"]');
-  if (!card||card.value.replace(/\s/g,'').length<16) { showErr(err,'Enter a valid 16-digit card number.'); return; }
-  const u=currentUser(); if (u) u.adminPaidUntil=Date.now()+365*24*60*60*1000;
   save(); currentPage='home'; render();
 };
 
-// ══════════════════════════════════════════════════════════
-//  VIEWER PAGES
-// ══════════════════════════════════════════════════════════
-function renderViewerLanding() {
-  const u = currentUser();
-  const all = state.tournaments;
-  return `
-  <nav>
-    <div class="nav-logo"><div class="logo-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/></svg></div>AuctionAdda</div>
-    <div class="nav-right">
-      <span style="font-size:12px;color:var(--muted)">${esc(u.name)}</span>
-      <span class="nav-badge nav-badge-viewer">Viewer</span>
-      <button class="btn btn-sm" onclick="doLogout()">Sign out</button>
-    </div>
-  </nav>
-  <div class="viewer-banner">👁️ Viewer mode — auto-refreshing every 5s</div>
-  <div class="page">
-    <div class="section-header"><div class="section-title">Active tournaments</div></div>
-    ${!all.length ? `<div class="empty">No tournaments available yet.</div>` : `
-    <div class="tournament-list-grid">
-      ${all.map(t => {
-        const isLive = t.auction && t.auction.active;
-        const soldCount = Object.keys((t.auction||{}).sold||{}).length;
-        return `<div class="tournament-list-card" onclick="joinViewerAuction('${t.id}')">
-          <div class="tlc-banner">${t.bannerImage?`<img src="${t.bannerImage}"/>`:''}
-            <div class="tlc-banner-text">${esc(t.name||'')}</div>
-          </div>
-          <div class="tlc-body">
-            <div class="tlc-name">${esc(t.name)}</div>
-            <div class="tlc-meta"><span>${(t.teams||[]).length} teams</span><span>${(t.players||[]).length} players</span><span>${soldCount} sold</span></div>
-            <span class="tlc-status ${isLive?'tlc-status-live':'tlc-status-draft'}">${isLive?'<span class="dot dot-green"></span> Live':'⏳ Waiting'}</span>
-            <div style="margin-top:10px"><button class="btn btn-primary btn-sm btn-full">${isLive?'▶ Watch live':'👁 Join & wait'}</button></div>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>`}
-  </div>`;
-}
-window.joinViewerAuction = function(id) { state.currentTournamentId=id; currentPage='view-live'; viewerTab='live'; save(); render(); };
+// ── Viewer link helpers (called from setup page) ──────────
+window.copyViewerLink = id => {
+  const link = baseUrl() + '?view=' + id;
+  navigator.clipboard.writeText(link).then(()=>alert('Viewer link copied!\n\n'+link)).catch(()=>prompt('Copy this link:',link));
+};
+window.openViewerLink = id => { window.open(baseUrl()+'?view='+id,'_blank'); };
 
-let viewerTab = 'live'; // 'live' | 'upcoming' | 'results'
+// ══════════════════════════════════════════════════════════
+//  PUBLIC VIEWER (no login — ?view=TOURNAMENT_ID)
+// ══════════════════════════════════════════════════════════
+let viewerTab = 'live';
 window.setViewerTab = t => { viewerTab = t; render(); };
 
-function renderViewerWrapper() {
-  const u = currentUser();
-  const t = currentTournament();
-  if (!t) return `<div class="page"><div class="empty">Tournament not found. <span class="auth-link" onclick="currentPage='view-picker';render()">Go back</span></div></div>`;
+function renderPublicViewer(tourId) {
+  const t = state.tournaments.find(x => x.id === tourId);
+  if (!t) return `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)"><div style="text-align:center;padding:40px"><div style="font-size:48px;margin-bottom:12px">⏳</div><div style="font-size:16px;font-weight:500">Loading tournament…</div><div style="font-size:13px;color:var(--muted);margin-top:6px">If this keeps showing, the link may be invalid.</div></div></div>`;
   const a = t.auction || {};
   const isLive = a.active && a.currentPlayerId;
   const soldCount = Object.keys(a.sold||{}).length;
+  const hammerSvg = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/><path d="M17 6L7 16"/></svg>`;
 
-  // Tab content
   let tabContent = '';
-  if (viewerTab === 'live') {
-    tabContent = !isLive
-      ? `<div style="text-align:center;padding:48px 20px"><div style="font-size:48px;margin-bottom:12px">⏳</div><div style="font-size:16px;font-weight:500;margin-bottom:6px">Auction not started yet</div><div style="font-size:13px;color:var(--muted)">This page refreshes automatically.</div></div>`
-      : renderViewerLiveContent(t);
-  } else if (viewerTab === 'upcoming') {
-    tabContent = renderViewerUpcoming(t);
-  } else if (viewerTab === 'results') {
-    tabContent = renderViewerResults(t);
-  }
+  if (viewerTab==='live')     tabContent = renderPublicLive(t);
+  if (viewerTab==='teams')    tabContent = renderPublicTeams(t);
+  if (viewerTab==='players')  tabContent = renderPublicPlayers(t);
+  if (viewerTab==='results')  tabContent = renderPublicResults(t);
 
   return `
   <nav>
-    <div class="nav-logo" onclick="currentPage='view-picker';render()" style="cursor:pointer"><div class="logo-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2L22 9l-9 9-7-7 9-9z"/><path d="M9 15L2 22"/></svg></div>AuctionAdda</div>
+    <div class="nav-logo"><div class="logo-icon">${hammerSvg}</div>${esc(t.name)}</div>
     <div class="nav-right">
-      <button class="btn btn-sm" onclick="currentPage='view-picker';render()">← Back</button>
-      <span class="nav-badge nav-badge-viewer">Viewer</span>
-      <button class="btn btn-sm" onclick="doLogout()">Sign out</button>
+      <span class="nav-badge nav-badge-viewer">👁️ Viewer</span>
+      ${isLive?`<span class="tlc-status tlc-status-live" style="font-size:11px"><span class="dot dot-green"></span>Live</span>`:''}
     </div>
   </nav>
-  <div class="viewer-banner"><span class="dot dot-green"></span><b>${esc(t.name)}</b> — live updates</div>
-  ${t.bannerImage?`<div class="tournament-header"><img class="banner-img" src="${t.bannerImage}"/><div class="banner-content"><div class="banner-name">${esc(t.name)}</div></div></div>`:''}
+  ${t.bannerImage?`<div class="tournament-header"><img class="banner-img" src="${t.bannerImage}"/><div class="banner-content"><div class="banner-name">${esc(t.name)}</div><div class="banner-sub">🏏 Cricket Auction</div></div></div>`:''}
   <div class="viewer-tab-bar">
-    <div class="viewer-tab ${viewerTab==='live'?'active':''}" onclick="setViewerTab('live')">
-      ${isLive?'<span class="dot dot-green" style="margin-right:4px"></span>':''}Live
-    </div>
-    <div class="viewer-tab ${viewerTab==='upcoming'?'active':''}" onclick="setViewerTab('upcoming')">
-      Up Next ${(a.queue||[]).length > 0 ? `<span class="viewer-tab-badge">${(a.queue||[]).length - (a.queue||[]).indexOf(a.currentPlayerId||'') - 1 > 0 ? (a.queue||[]).length - (a.queue||[]).indexOf(a.currentPlayerId||'') - 1 : (a.queue||[]).length}</span>` : ''}
-    </div>
-    <div class="viewer-tab ${viewerTab==='results'?'active':''}" onclick="setViewerTab('results')">
-      Results ${soldCount > 0 ? `<span class="viewer-tab-badge">${soldCount}</span>` : ''}
-    </div>
+    <div class="viewer-tab ${viewerTab==='live'?'active':''}" onclick="setViewerTab('live')">${isLive?'<span class="dot dot-green" style="margin-right:4px"></span>':''}Live</div>
+    <div class="viewer-tab ${viewerTab==='teams'?'active':''}" onclick="setViewerTab('teams')">Teams <span class="viewer-tab-badge">${(t.teams||[]).length}</span></div>
+    <div class="viewer-tab ${viewerTab==='players'?'active':''}" onclick="setViewerTab('players')">Players <span class="viewer-tab-badge">${(t.players||[]).length}</span></div>
+    <div class="viewer-tab ${viewerTab==='results'?'active':''}" onclick="setViewerTab('results')">Results${soldCount?` <span class="viewer-tab-badge">${soldCount}</span>`:''}</div>
   </div>
-  <div class="viewer-auction">
-    ${tabContent}
-    ${viewerTab === 'live' ? `
-    <div class="card" style="margin-top:16px">
-      <div class="card-title">Teams</div>
-      <div class="viewer-teams">
-        ${(t.teams||[]).map(tm=>{
-          const squad=teamSquad(tm.id,t), spent=squad.reduce((s,x)=>s+x.price,0), budget=(t.budget||0)-spent;
-          const pct=t.budget?Math.max(0,Math.round(budget/t.budget*100)):0;
-          const logo = tm.teamLogo || null;
-          return `<div class="viewer-team-card">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-              <div style="width:32px;height:32px;border-radius:50%;background:var(--green);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">
-                ${logo?`<img src="${logo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-                  `<span style="color:#fff;font-size:11px;font-weight:700">${initials(tm.name)}</span>`}
-              </div>
-              <div>
-                <div style="font-size:13px;font-weight:500">${esc(tm.name)}</div>
-                <div style="font-size:11px;color:var(--muted)">${squad.length} players</div>
-              </div>
-            </div>
-            <div class="budget-bar-wrap"><div class="budget-bar" style="width:${pct}%;background:var(--green)"></div></div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">${fmt(budget)} left</div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>` : ''}
-  </div>`;
+  <div class="page" style="max-width:720px">${tabContent}</div>`;
 }
 
-function renderViewerUpcoming(t) {
+function renderPublicLive(t) {
   const a = t.auction || {};
-  const queue = a.queue || [];
-  const curIdx = queue.indexOf(a.currentPlayerId||'');
-  // Show upcoming players (after current), then all pending unsold players
-  const upcomingIds = curIdx >= 0 ? queue.slice(curIdx + 1) : queue;
-  const sold = a.sold || {};
-  const unsoldIds = a.unsold || [];
-  // Also show players not yet in any queue
-  const allPendingIds = (t.players||[])
-    .filter(p => !sold[p.id] && !unsoldIds.includes(p.id) && !queue.includes(p.id))
-    .map(p => p.id);
-
-  const renderRow = (pid, label) => {
-    const p = (t.players||[]).find(x => x.id === pid); if (!p) return '';
-    const cat = (t.categories||[]).find(c => c.id === p.categoryId);
-    const photoSrc = p.photoLocal || p.photo || '';
-    return `<div class="viewer-upcoming-row">
-      <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--bg);flex-shrink:0;display:flex;align-items:center;justify-content:center">
-        ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-          `<span style="font-size:12px;font-weight:600;color:var(--muted)">${initials(p.name)}</span>`}
-      </div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:500">${esc(p.name)}</div>
-        <div style="font-size:11px;color:var(--muted);margin-top:1px;display:flex;gap:6px;align-items:center">
-          ${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color};font-size:10px">${cat.icon} ${esc(cat.label)}</span>`:''}
-          <span>${esc(p.role||'')}</span>
-          ${label?`<span style="font-size:10px;background:var(--amber-light);color:#633806;padding:1px 6px;border-radius:10px">${label}</span>`:''}
+  const isLive = a.active && a.currentPlayerId;
+  if (!isLive) {
+    // Show upcoming queue if available
+    const queue = a.queue || [];
+    const sold = a.sold || {};
+    const unsold = a.unsold || [];
+    const pending = (t.players||[]).filter(p => !sold[p.id] && !unsold.includes(p.id));
+    return `
+    <div style="text-align:center;padding:40px 20px 24px">
+      <div style="font-size:52px;margin-bottom:12px">⏳</div>
+      <div style="font-size:18px;font-weight:600;margin-bottom:6px">Auction not live yet</div>
+      <div style="font-size:13px;color:var(--muted)">This page updates automatically when the auction starts.</div>
+    </div>
+    ${pending.length?`<div class="card"><div class="card-title">Players yet to be auctioned (${pending.length})</div>
+    ${pending.slice(0,20).map(p=>{
+      const cat=(t.categories||[]).find(c=>c.id===p.categoryId);
+      const src=p.photoLocal||p.photo||'';
+      return `<div class="viewer-upcoming-row" onclick="showPlayerModal('${p.id}','${t.id}')" style="cursor:pointer">
+        <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--bg);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+          ${src?`<img src="${src}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+            `<span style="font-size:12px;font-weight:600;color:var(--muted)">${initials(p.name)}</span>`}
         </div>
-      </div>
-      <div style="font-size:12px;color:var(--green);font-weight:600;flex-shrink:0">${fmt(cat?cat.basePrice:0)}</div>
-    </div>`;
-  };
-
-  if (!upcomingIds.length && !allPendingIds.length) {
-    return `<div style="text-align:center;padding:48px 20px"><div style="font-size:40px;margin-bottom:12px">🏁</div><div style="font-size:15px;font-weight:500">No upcoming players</div><div style="font-size:13px;color:var(--muted);margin-top:6px">All players have been auctioned or the auction hasn't started.</div></div>`;
-  }
-
-  return `
-  <div class="card">
-    <div class="card-title">Up next in queue (${upcomingIds.length})</div>
-    ${upcomingIds.length ? upcomingIds.map(id => renderRow(id,'')).join('') : `<div style="font-size:13px;color:var(--muted)">End of current queue.</div>`}
-  </div>
-  ${allPendingIds.length ? `
-  <div class="card">
-    <div class="card-title">Not yet queued (${allPendingIds.length})</div>
-    ${allPendingIds.map(id => renderRow(id,'pending')).join('')}
-  </div>` : ''}`;
-}
-
-function renderViewerResults(t) {
-  const sold = t.auction.sold || {};
-  const soldEntries = Object.entries(sold);
-  if (!soldEntries.length) {
-    return `<div style="text-align:center;padding:48px 20px"><div style="font-size:40px;margin-bottom:12px">📋</div><div style="font-size:15px;font-weight:500">No results yet</div><div style="font-size:13px;color:var(--muted);margin-top:6px">Results will appear here as players are sold.</div></div>`;
-  }
-  const totalSpend = soldEntries.reduce((s,[,x])=>s+x.price,0);
-  // Top 3 sold
-  const topSold = soldEntries
-    .map(([pid,s]) => ({player:(t.players||[]).find(p=>p.id===pid), team:(t.teams||[]).find(tm=>tm.id===s.teamId), price:s.price}))
-    .filter(x=>x.player&&x.team)
-    .sort((a,b)=>b.price-a.price)
-    .slice(0,3);
-
-  return `
-  <div class="viewer-results-hero">
-    <div class="vr-stat"><div class="vr-val">${soldEntries.length}</div><div class="vr-lbl">Players Sold</div></div>
-    <div class="vr-stat"><div class="vr-val">${(t.auction.unsold||[]).length}</div><div class="vr-lbl">Unsold</div></div>
-    <div class="vr-stat"><div class="vr-val vr-val-sm">${fmt(totalSpend)}</div><div class="vr-lbl">Total Spend</div></div>
-  </div>
-  ${topSold.length ? `
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-title">🏆 Top buys</div>
-    <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-      ${topSold.map(({player:p,team:tm,price},i) => {
-        const photoSrc = p.photoLocal||p.photo||'';
-        const medal = ['🥇','🥈','🥉'][i];
-        const cat = (t.categories||[]).find(c=>c.id===p.categoryId);
-        return `<div class="vr-top-card">
-          <div style="font-size:28px;margin-bottom:6px">${medal}</div>
-          <div style="width:56px;height:56px;border-radius:50%;overflow:hidden;background:var(--bg);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;border:2px solid var(--green)">
-            ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-              `<span style="font-size:18px;font-weight:600;color:var(--muted)">${initials(p.name)}</span>`}
+        <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:500">${esc(p.name)}</div>
+          <div style="font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center;margin-top:2px">
+            ${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color};font-size:10px">${cat.icon} ${esc(cat.label)}</span>`:''}${esc(p.role||'')}
           </div>
-          <div style="font-size:13px;font-weight:600;margin-bottom:2px">${esc(p.name)}</div>
-          ${cat?`<div style="margin-bottom:4px"><span class="cat-badge" style="background:${cat.color}22;color:${cat.color};font-size:10px">${cat.icon} ${esc(cat.label)}</span></div>`:''}
-          <div style="font-size:15px;font-weight:700;color:var(--green)">${fmt(price)}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(tm.name)}</div>
+        </div>
+        <div style="font-size:12px;color:var(--green);font-weight:600">${fmt((cat||{}).basePrice||0)}</div>
+      </div>`;
+    }).join('')}
+    ${pending.length>20?`<div style="text-align:center;font-size:12px;color:var(--muted);padding:10px">+${pending.length-20} more players</div>`:''}
+    </div>`:''}`;
+  }
+
+  const player = (t.players||[]).find(p=>p.id===a.currentPlayerId);
+  if (!player) return `<div class="empty">Loading...</div>`;
+  const cat = (t.categories||[]).find(c=>c.id===player.categoryId);
+  const lead = a.leadTeamId ? (t.teams||[]).find(tm=>tm.id===a.leadTeamId) : null;
+  const qIdx = (a.queue||[]).indexOf(a.currentPlayerId);
+  const photoSrc = player.photoLocal||player.photo||'';
+
+  // Fetch stats if needed
+  if (player.userId && !statsCache[player.userId]) { statsCache[player.userId]='loading'; fetchPlayerStats(player.userId); }
+
+  return `
+  <div class="viewer-player-card" onclick="showPlayerModal('${player.id}','${t.id}')" style="cursor:pointer" title="Tap for full stats">
+    <div style="width:100px;height:100px;border-radius:50%;overflow:hidden;margin:0 auto 14px;background:var(--bg);display:flex;align-items:center;justify-content:center;border:3px solid ${cat?cat.color:'var(--green)'}">
+      ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+        `<span style="font-size:34px;font-weight:700;color:var(--muted)">${initials(player.name)}</span>`}
+    </div>
+    <div class="spotlight-name">${esc(player.name)}</div>
+    <div style="margin-bottom:4px">${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color}">${cat.icon} ${esc(cat.label)}</span>`:''}<span style="font-size:12px;color:var(--muted);margin-left:6px">${esc(player.role||'')}</span></div>
+    <div class="current-bid-label" style="margin-top:12px">Current bid</div>
+    <div class="viewer-bid" id="viewer-bid-amt">${fmt(a.currentBid)}</div>
+    <div class="viewer-lead" id="viewer-lead-txt">${lead?`<span style="color:var(--green);font-weight:600">⬆ ${esc(lead.name)} is leading</span>`:'No bids yet'}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px">Player ${qIdx+1} of ${(a.queue||[]).length}</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px;opacity:.7">Tap for stats</div>
+  </div>
+  ${renderStatsSection(player.userId||'')}
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">Teams</div>
+    <div class="viewer-teams">
+      ${(t.teams||[]).map(tm=>{
+        const sq=teamSquad(tm.id,t),spent=sq.reduce((s,x)=>s+x.price,0),budget=(t.budget||0)-spent;
+        const pct=t.budget?Math.max(0,Math.round(budget/t.budget*100)):0;
+        const logo=tm.teamLogo||null;
+        return `<div class="viewer-team-card">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div style="width:32px;height:32px;border-radius:50%;background:var(--green);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+              ${logo?`<img src="${logo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+                `<span style="color:#fff;font-size:11px;font-weight:700">${initials(tm.name)}</span>`}
+            </div>
+            <div><div style="font-size:13px;font-weight:500">${esc(tm.name)}</div><div style="font-size:11px;color:var(--muted)">${sq.length} players</div></div>
+          </div>
+          <div class="budget-bar-wrap"><div class="budget-bar" style="width:${pct}%;background:var(--green)"></div></div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">${fmt(budget)} left</div>
         </div>`;
       }).join('')}
     </div>
-  </div>` : ''}
-  ${(t.teams||[]).map(tm => {
-    const squad = teamSquad(tm.id,t);
-    if (!squad.length) return '';
-    const spent = squad.reduce((s,x)=>s+x.price,0);
-    const logo = tm.teamLogo||null;
-    return `<div class="card" style="margin-bottom:14px;overflow:hidden">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <div style="width:40px;height:40px;border-radius:50%;background:var(--green);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+  </div>`;
+}
+
+function renderPublicTeams(t) {
+  if (!(t.teams||[]).length) return `<div class="empty" style="padding:60px 20px">No teams added yet.</div>`;
+  return (t.teams||[]).map(tm => {
+    const sq = teamSquad(tm.id,t), spent=sq.reduce((s,x)=>s+x.price,0), remaining=(t.budget||0)-spent;
+    const logo=tm.teamLogo||null;
+    return `<div class="card">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <div style="width:56px;height:56px;border-radius:50%;background:var(--green);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(29,158,117,.25)">
           ${logo?`<img src="${logo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-            `<span style="color:#fff;font-size:13px;font-weight:700">${initials(tm.name)}</span>`}
+            `<span style="color:#fff;font-size:18px;font-weight:700">${initials(tm.name)}</span>`}
         </div>
-        <div style="flex:1">
-          <div style="font-size:14px;font-weight:600">${esc(tm.name)}</div>
-          <div style="font-size:11px;color:var(--muted)">${squad.length} players &bull; Spent ${fmt(spent)}</div>
+        <div>
+          <div style="font-size:16px;font-weight:700">${esc(tm.name)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">👤 ${esc(tm.owner||'—')} &bull; ${sq.length} players &bull; Spent ${fmt(spent)}</div>
         </div>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">
-        ${squad.sort((a,b)=>b.price-a.price).map(({player:p,price})=>{
-          const photoSrc = p.photoLocal||p.photo||'';
-          return `<div style="display:flex;align-items:center;gap:6px;background:var(--bg);border-radius:8px;padding:5px 8px;min-width:0">
-            <div style="width:24px;height:24px;border-radius:50%;overflow:hidden;background:var(--card-bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:600">
-              ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:initials(p.name)}
-            </div>
-            <div>
-              <div style="font-size:11px;font-weight:500">${esc(p.name.split(' ')[0])}</div>
-              <div style="font-size:10px;color:var(--green);font-weight:600">${fmt(price)}</div>
-            </div>
-          </div>`;
-        }).join('')}
+      ${sq.length?`<div style="display:flex;flex-wrap:wrap;gap:8px">${sq.sort((a,b)=>b.price-a.price).map(({player:p,price})=>{
+        const src=p.photoLocal||p.photo||'';
+        return `<div style="display:flex;align-items:center;gap:6px;background:var(--bg);border-radius:8px;padding:6px 10px;cursor:pointer" onclick="showPlayerModal('${p.id}','${t.id}')">
+          <div style="width:28px;height:28px;border-radius:50%;overflow:hidden;background:var(--card-bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px">
+            ${src?`<img src="${src}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:initials(p.name)}
+          </div>
+          <div><div style="font-size:12px;font-weight:500">${esc(p.name)}</div><div style="font-size:11px;color:var(--green);font-weight:600">${fmt(price)}</div></div>
+        </div>`;
+      }).join('')}</div>`:`<div style="font-size:13px;color:var(--muted)">No players yet</div>`}
+    </div>`;
+  }).join('');
+}
+
+function renderPublicPlayers(t) {
+  const sold=t.auction.sold||{};
+  if (!(t.players||[]).length) return `<div class="empty" style="padding:60px 20px">No players added yet.</div>`;
+  return `<div class="grid-3">${(t.players||[]).map(p=>{
+    const cat=(t.categories||[]).find(c=>c.id===p.categoryId);
+    const soldInfo=sold[p.id];
+    const soldTeam=soldInfo?(t.teams||[]).find(tm=>tm.id===soldInfo.teamId):null;
+    const src=p.photoLocal||p.photo||'';
+    return `<div class="player-card" onclick="showPlayerModal('${p.id}','${t.id}')" style="cursor:pointer">
+      <div style="display:flex;gap:10px;margin-bottom:6px">
+        <div class="player-pic">${src?`<img src="${src}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+          `<span style="font-size:18px;font-weight:500">${initials(p.name)}</span>`}</div>
+        <div style="flex:1;min-width:0">
+          <div class="player-name">${esc(p.name)}</div>
+          <div class="player-meta">${esc(p.role||'')}${p.country?' · '+esc(p.country):''}</div>
+          ${catBadgeHtml(p.categoryId,t.categories)}
+        </div>
+      </div>
+      <div class="player-footer">
+        ${soldTeam?`<span class="badge badge-sold">✓ ${esc(soldTeam.name)} — ${fmt(soldInfo.price)}</span>`:
+          `<span style="font-size:11px;color:var(--muted)">Base: ${fmt((cat||{}).basePrice||0)}</span>`}
       </div>
     </div>`;
-  }).join('')}`;
+  }).join('')}</div>`;
 }
-function renderViewerLiveContent(t) {
-  const a=t.auction, player=(t.players||[]).find(p=>p.id===a.currentPlayerId);
-  if (!player) return `<div style="text-align:center;padding:48px 20px"><div style="font-size:48px;margin-bottom:12px">⏳</div><div style="font-size:15px;font-weight:500">Waiting for player...</div></div>`;
-  const cat=(t.categories||[]).find(c=>c.id===player.categoryId);
-  const lead=a.leadTeamId?(t.teams||[]).find(tm=>tm.id===a.leadTeamId):null;
-  const qIdx=(a.queue||[]).indexOf(a.currentPlayerId);
-  const photoSrc = player.photoLocal || player.photo || '';
+
+function renderPublicResults(t) {
+  const soldEntries=Object.entries(t.auction.sold||{});
+  if (!soldEntries.length) return `<div style="text-align:center;padding:60px 20px"><div style="font-size:48px;margin-bottom:12px">📋</div><div style="font-size:16px;font-weight:500">No results yet</div><div style="font-size:13px;color:var(--muted);margin-top:6px">Results appear as players are sold.</div></div>`;
+  const totalSpend=soldEntries.reduce((s,[,x])=>s+x.price,0);
+  const allSold=soldEntries.map(([pid,s])=>({player:(t.players||[]).find(p=>p.id===pid),team:(t.teams||[]).find(tm=>tm.id===s.teamId),price:s.price})).filter(x=>x.player&&x.team).sort((a,b)=>b.price-a.price);
   return `
-  <div class="viewer-player-card">
-    <div style="width:90px;height:90px;border-radius:50%;overflow:hidden;margin:0 auto 12px;background:var(--bg);display:flex;align-items:center;justify-content:center">
-      ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-        `<span style="font-size:30px;font-weight:600;color:var(--muted)">${initials(player.name)}</span>`}
+  <div class="viewer-results-hero">
+    <div class="vr-stat"><div class="vr-val">${soldEntries.length}</div><div class="vr-lbl">Sold</div></div>
+    <div class="vr-stat"><div class="vr-val">${(t.auction.unsold||[]).length}</div><div class="vr-lbl">Unsold</div></div>
+    <div class="vr-stat"><div class="vr-val vr-val-sm">${fmt(totalSpend)}</div><div class="vr-lbl">Total Spend</div></div>
+  </div>
+  <div class="card"><div class="card-title">🏆 Top 10 Most Expensive</div>
+    ${allSold.slice(0,10).map(({player:p,team:tm,price},i)=>{
+      const cat=(t.categories||[]).find(c=>c.id===p.categoryId);
+      const src=p.photoLocal||p.photo||'';
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':null;
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:.5px solid var(--border);${i===Math.min(9,allSold.length-1)?'border:none':''}" onclick="showPlayerModal('${p.id}','${t.id}')" class="clickable-row">
+        <div style="font-size:${medal?'20px':'13px'};font-weight:700;color:var(--muted);width:28px;text-align:center;flex-shrink:0">${medal||i+1}</div>
+        <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px">
+          ${src?`<img src="${src}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:initials(p.name)}
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(p.name)}</div>
+          <div style="font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center;margin-top:1px">
+            ${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color};font-size:10px">${cat.icon} ${esc(cat.label)}</span>`:''}${esc(p.role||'')}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:15px;font-weight:700;color:var(--green)">${fmt(price)}</div>
+          <div style="font-size:11px;color:var(--muted)">${esc(tm.name)}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+  ${(t.teams||[]).map(tm=>{
+    const sq=teamSquad(tm.id,t); if(!sq.length) return '';
+    const spent=sq.reduce((s,x)=>s+x.price,0), logo=tm.teamLogo||null;
+    return `<div class="card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="width:40px;height:40px;border-radius:50%;background:var(--green);overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center">
+        ${logo?`<img src="${logo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+          `<span style="color:#fff;font-size:13px;font-weight:700">${initials(tm.name)}</span>`}
+      </div>
+      <div><div style="font-size:14px;font-weight:600">${esc(tm.name)}</div><div style="font-size:11px;color:var(--muted)">${sq.length} players &bull; Spent ${fmt(spent)}</div></div>
     </div>
-    <div class="spotlight-name">${esc(player.name)}</div>
-    <div style="margin-bottom:10px">${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color}">${cat.icon} ${esc(cat.label)}</span>`:''}</div>
-    <div class="current-bid-label">Current bid</div>
-    <div class="viewer-bid">${fmt(a.currentBid)}</div>
-    <div class="viewer-lead">${lead?`⬆ ${esc(lead.name)} is leading`:'No bids yet'}</div>
-    ${player.userId ? renderStatsSection(player.userId) : ''}
-    <div style="font-size:12px;color:var(--muted);margin-top:8px">Player ${qIdx+1} of ${(a.queue||[]).length}</div>
-  </div>`;
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${sq.sort((a,b)=>b.price-a.price).map(({player:p,price})=>{
+      const src=p.photoLocal||p.photo||'';
+      return `<div style="display:flex;align-items:center;gap:5px;background:var(--bg);border-radius:8px;padding:5px 8px;cursor:pointer" onclick="showPlayerModal('${p.id}','${t.id}')">
+        <div style="width:22px;height:22px;border-radius:50%;overflow:hidden;flex-shrink:0;background:var(--card-bg);display:flex;align-items:center;justify-content:center;font-size:8px">
+          ${src?`<img src="${src}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:initials(p.name)}
+        </div>
+        <div><div style="font-size:11px;font-weight:500">${esc(p.name.split(' ')[0])}</div><div style="font-size:10px;color:var(--green);font-weight:600">${fmt(price)}</div></div>
+      </div>`;
+    }).join('')}</div></div>`;
+  }).join('')}`;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1077,7 +865,6 @@ function renderAdminShell() {
       <button class="btn btn-sm" onclick="doLogout()">Sign out</button>
     </div>
   </nav>
-  ${!paid?`<div class="warn-banner">⚠️ Subscription expired. <span class="auth-link" onclick="currentPage='payment';render()">Renew ₹500/yr</span></div>`:''}
   ${bannerHtml}
   <div class="page">${pageContent}</div>`;
 }
@@ -1089,7 +876,6 @@ function renderHomePage() {
   const u=currentUser(), myTours=state.tournaments.filter(t=>t.ownerId===u.id);
   const totalSold=myTours.reduce((s,t)=>s+Object.keys(t.auction.sold||{}).length,0);
   const liveTours=myTours.filter(t=>t.auction&&t.auction.active);
-  const paid=isAdmin();
   return `
   <div style="max-width:600px;margin:0 auto">
     <div class="card" style="display:flex;align-items:center;gap:20px;margin-bottom:20px">
@@ -1097,11 +883,7 @@ function renderHomePage() {
       <div style="flex:1">
         <div style="font-size:20px;font-weight:600;margin-bottom:2px">${esc(u.name)}</div>
         <div style="font-size:13px;color:var(--muted)">${esc(u.email||'')}${u.phone?' · +91 '+esc(u.phone):''}</div>
-        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
-          <span class="nav-badge nav-badge-admin" style="font-size:12px;padding:3px 10px">Admin</span>
-          ${paid?`<span style="font-size:12px;color:var(--green);background:var(--green-light);padding:3px 10px;border-radius:20px">✓ Active until ${new Date(u.adminPaidUntil).toLocaleDateString('en-IN')}</span>`
-            :`<span style="font-size:12px;color:var(--red);background:#fcebeb;padding:3px 10px;border-radius:20px;cursor:pointer" onclick="currentPage='payment';render()">⚠ Expired — Renew</span>`}
-        </div>
+        <div style="margin-top:8px"><span class="nav-badge nav-badge-admin" style="font-size:12px;padding:3px 10px">Admin</span></div>
       </div>
     </div>
     <div class="summary-row">
@@ -1217,8 +999,18 @@ window.deleteTournament = function(id) {
 // ══════════════════════════════════════════════════════════
 function renderSetup() {
   const t=currentTournament(); if(!t) return '';
+  const viewerLink = baseUrl() + '?view=' + t.id;
   return `
   <div class="section-header"><div class="section-title">Tournament setup</div></div>
+  <div class="card" style="border-color:rgba(55,138,221,.3);background:var(--blue-light)">
+    <div class="card-title" style="color:var(--blue)">👁️ Public viewer link</div>
+    <div style="font-size:13px;color:var(--blue);margin-bottom:10px;line-height:1.6">Share this link with anyone — they can watch the live auction, browse teams, players and results without logging in.</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1;font-family:monospace;font-size:12px;background:rgba(55,138,221,.12);border-radius:6px;padding:8px 10px;color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">${viewerLink}</div>
+      <button class="btn btn-sm btn-blue" onclick="copyViewerLink('${t.id}')">📋 Copy link</button>
+      <button class="btn btn-sm btn-blue" onclick="openViewerLink('${t.id}')">↗ Open</button>
+    </div>
+  </div>
   <div class="card">
     <div class="card-title">Details</div>
     <div class="grid-2">
@@ -1431,7 +1223,7 @@ window.setPlayerFilter = f => { playerFilter=f; render(); };
 
 function renderPlayerCard(p) {
   const t=currentTournament(), sold=t?(t.auction.sold||{})[p.id]:null, team=sold?getTeam(sold.teamId):null;
-  return `<div class="player-card">
+  return `<div class="player-card" onclick="showPlayerModal('${p.id}')" style="cursor:pointer">
     <div style="display:flex;gap:10px;margin-bottom:6px">
       <div class="player-pic">${playerPhotoHtml(p,48)}</div>
       <div style="flex:1;min-width:0">
@@ -1778,9 +1570,6 @@ window.resumeAuction = () => { const t=currentTournament();if(t&&t.auction.curre
 window.stopAuction   = () => { if(!confirm('Stop auction?'))return;const t=currentTournament();if(!t)return;t.auction.active=false;t.auction.currentPlayerId=null;t.auction.currentBid=0;t.auction.leadTeamId=null;t.auction.queue=[];save();render(); };
 window.revokeSold = pid => { const t=currentTournament();if(!t)return;const p=t.players.find(x=>x.id===pid);if(!p)return;if(!confirm(`Revoke sale of "${p.name}" and return to queue?`))return;delete (t.auction.sold||{})[pid];const q=t.auction.queue||[];if(!q.includes(pid)){if(t.auction.currentPlayerId){const i=q.indexOf(t.auction.currentPlayerId);q.splice(i+1,0,pid);}else q.unshift(pid);t.auction.queue=q;}save();render(); };
 
-const statsCache2 = {};
-const statsOpenUsers2 = new Set();
-
 function renderLiveAuction(t) {
   const a=t.auction, player=t.players.find(p=>p.id===a.currentPlayerId);
   if (!player) { a.active=false;a.currentPlayerId=null;save();render();return `<div class="empty">Auction error.</div>`; }
@@ -1893,12 +1682,29 @@ function renderStatsSection(userId) {
 }
 window.statsToggle = (sid,userId) => { const body=document.getElementById(sid+'-body'),arrow=document.getElementById(sid+'-arrow');if(!body)return;const willOpen=body.style.display==='none';body.style.display=willOpen?'block':'none';if(arrow)arrow.style.transform=willOpen?'rotate(180deg)':'rotate(0deg)';if(userId){willOpen?statsOpenUsers.add(userId):statsOpenUsers.delete(userId);} };
 window.statsShowTab = (sid,key) => { document.querySelectorAll(`[id^="${sid}-panel-"]`).forEach(p=>p.style.display='none');document.querySelectorAll(`[id^="${sid}-tab-"]`).forEach(t=>t.classList.remove('active'));const panel=document.getElementById(`${sid}-panel-${key}`),tab=document.getElementById(`${sid}-tab-${key}`);if(panel)panel.style.display='grid';if(tab)tab.classList.add('active'); };
-async function fetchPlayerStats(userId) { try{const resp=await fetch(`https://api.cricheroes.in/api/v1/player/get-player-statistic/${userId}`,{headers:CH_HEADERS});if(!resp.ok){statsCache[userId]='error';reRenderStats();return;}const data=await resp.json();console.log('[AuctionAdda] stats:',data);const stats=data.data||data;statsCache[userId]=(stats&&typeof stats==='object')?stats:'none';reRenderStats();}catch(e){statsCache[userId]='error';reRenderStats();} }
-function reRenderStats(){
-  // Only re-render if there are no still-loading stats — avoids wiping mid-fetch states
-  const anyLoading = Object.values(statsCache).some(v => v === 'loading');
-  if (anyLoading) return;
-  if(currentPage==='auction'&&currentTournament()&&currentTournament().auction.active) render();
+async function fetchPlayerStats(userId) {
+  try {
+    const resp = await fetch(`https://api.cricheroes.in/api/v1/player/get-player-statistic/${userId}`, {headers:CH_HEADERS});
+    if (!resp.ok) { statsCache[userId]='error'; patchStatsInDOM(userId); return; }
+    const data = await resp.json();
+    const stats = data.data || data;
+    statsCache[userId] = (stats && typeof stats==='object') ? stats : 'none';
+  } catch(e) {
+    statsCache[userId] = 'error';
+  }
+  patchStatsInDOM(userId);
+}
+
+// Patch stats HTML in-place without a full re-render
+function patchStatsInDOM(userId) {
+  const sid = 'stats-' + userId.replace(/[^a-z0-9]/gi,'');
+  const el = document.getElementById(sid);
+  if (el) {
+    el.outerHTML = renderStatsSection(userId);
+  } else {
+    // Widget not in DOM yet — fall back to full re-render only on auction page
+    if (currentPage==='auction' && currentTournament() && currentTournament().auction.active) render();
+  }
 }
 
 window.placeBid = teamId => {
@@ -1908,9 +1714,36 @@ window.placeBid = teamId => {
   t.auction.currentBid+=(cat?cat.bidStep:50000);
   t.auction.leadTeamId=teamId;
   save();
-  // Silent patch — update only the bid-related DOM nodes to avoid jarring full re-render
+  const tm = t.teams.find(x=>x.id===teamId);
+  showBidFlash(tm?tm.name:'', t.auction.currentBid);
   patchAuctionBidUI(t);
 };
+
+// Bid flash animation — slides in from bottom, shows team + amount
+function showBidFlash(teamName, amount) {
+  const ex = document.getElementById('bid-flash'); if(ex) ex.remove();
+  const el = document.createElement('div'); el.id='bid-flash';
+  el.innerHTML = `<div class="bid-flash-inner"><span class="bid-flash-team">⬆ ${esc(teamName)}</span><span class="bid-flash-amt">${fmt(amount)}</span></div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(()=>{ el.classList.add('bid-flash-show'); });
+  setTimeout(()=>{ el.classList.add('bid-flash-hide'); setTimeout(()=>el.remove(),400); },1800);
+}
+
+function showSoldStamp(teamName, price, callback) {
+  const existing=document.getElementById('sold-stamp-overlay'); if(existing)existing.remove();
+  const ov=document.createElement('div'); ov.id='sold-stamp-overlay';
+  ov.innerHTML=`
+  <div class="sold-stamp-bg">
+    <div class="sold-hammer">🔨</div>
+    <div class="sold-stamp-box">
+      <div class="sold-stamp-text">SOLD!</div>
+      <div class="sold-stamp-team">${esc(teamName)}</div>
+      <div class="sold-stamp-price">${fmt(price)}</div>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  setTimeout(()=>{ov.classList.add('sold-stamp-fade');setTimeout(()=>{ov.remove();if(callback)callback();},400);},2000);
+}
 
 // Patch only changing elements on a bid — no full re-render flash
 function patchAuctionBidUI(t) {
@@ -1959,42 +1792,71 @@ window.promptMarkUnsold = () => {
   const t=currentTournament();if(!t)return;
   const a=t.auction, player=t.players.find(p=>p.id===a.currentPlayerId);
   if(!player) return;
+  const cat=(t.categories||[]).find(c=>c.id===player.categoryId);
   const catOptions=t.categories.filter(c=>c.id!==player.categoryId).map(c=>`<option value="${c.id}">${c.icon} ${esc(c.label)}</option>`).join('');
+  const photoSrc=player.photoLocal||player.photo||'';
   showModal('Pass player',`
-    <div style="margin-bottom:16px;font-size:14px">What would you like to do with <b>${esc(player.name)}</b>?</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn btn-full" style="justify-content:flex-start;padding:12px 16px" onclick="closeModal();doMarkUnsold()">
-        <div><div style="font-weight:500">Move to end of queue</div><div style="font-size:12px;color:var(--muted)">Player comes back later in the same auction</div></div>
+    <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg);border-radius:var(--radius-sm);margin-bottom:16px">
+      <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;background:var(--card-bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;border:2px solid ${cat?cat.color:'var(--border)'}">
+        ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+          `<span style="font-size:16px;font-weight:600;color:var(--muted)">${initials(player.name)}</span>`}
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:600">${esc(player.name)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${cat?cat.icon+' '+cat.label:''} &bull; ${esc(player.role||'')}</div>
+      </div>
+    </div>
+    <div style="font-size:13px;font-weight:500;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px;font-size:11px">What would you like to do?</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-full pass-action-btn" onclick="closeModal();doMarkUnsold()" style="text-align:left;padding:14px 16px;border-radius:var(--radius-sm)">
+        <div style="font-size:15px;margin-bottom:1px">🔁 Move to end of queue</div>
+        <div style="font-size:12px;color:var(--muted);font-weight:400">Player comes back at the end of this auction round</div>
       </button>
-      ${catOptions?`<div style="padding:12px 16px;border:.5px solid var(--border);border-radius:var(--radius-sm)">
-        <div style="font-weight:500;margin-bottom:8px">Move to different category</div>
-        <select id="move-cat-select" style="margin-bottom:8px">${catOptions}</select>
-        <button class="btn btn-primary btn-sm" onclick="doMoveCategoryAndPass()">Move & pass</button>
+      ${catOptions?`
+      <div style="padding:14px 16px;border:.5px solid var(--border);border-radius:var(--radius-sm);background:var(--card-bg)">
+        <div style="font-size:14px;font-weight:500;margin-bottom:8px">📂 Move to different category</div>
+        <select id="move-cat-select" style="margin-bottom:10px;font-size:13px">${catOptions}</select>
+        <button class="btn btn-primary btn-sm" onclick="doMoveCategoryAndPass()" style="width:100%">Move & pass →</button>
       </div>`:''}
-      <button class="btn btn-danger btn-full" style="justify-content:flex-start;padding:12px 16px" onclick="closeModal();doMarkUnsoldFinal()">
-        <div><div style="font-weight:500">Mark as unsold (final)</div><div style="font-size:12px;color:rgba(255,255,255,.7)">Remove from auction, add to unsold pool</div></div>
+      <button class="btn btn-danger btn-full pass-action-btn" onclick="closeModal();doMarkUnsoldFinal()" style="text-align:left;padding:14px 16px;border-radius:var(--radius-sm)">
+        <div style="font-size:15px;margin-bottom:1px">🚫 Mark as unsold (final)</div>
+        <div style="font-size:12px;opacity:.75;font-weight:400">Permanently remove from auction queue</div>
       </button>
     </div>
-    <div class="form-actions" style="margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button></div>`);
 };
 window.promptSkip = () => {
   const t=currentTournament();if(!t)return;
   const player=t.players.find(p=>p.id===t.auction.currentPlayerId);
   if(!player) return;
+  const cat=(t.categories||[]).find(c=>c.id===player.categoryId);
   const catOptions=t.categories.filter(c=>c.id!==player.categoryId).map(c=>`<option value="${c.id}">${c.icon} ${esc(c.label)}</option>`).join('');
+  const photoSrc=player.photoLocal||player.photo||'';
   showModal('Skip player',`
-    <div style="margin-bottom:16px;font-size:14px">Skip <b>${esc(player.name)}</b> — where should this player go?</div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <button class="btn btn-full" style="justify-content:flex-start;padding:12px 16px" onclick="closeModal();doSkip()">
-        <div><div style="font-weight:500">Skip — come back later</div><div style="font-size:12px;color:var(--muted)">Moves to end of current queue</div></div>
+    <div style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg);border-radius:var(--radius-sm);margin-bottom:16px">
+      <div style="width:48px;height:48px;border-radius:50%;overflow:hidden;background:var(--card-bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;border:2px solid ${cat?cat.color:'var(--border)'}">
+        ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+          `<span style="font-size:16px;font-weight:600;color:var(--muted)">${initials(player.name)}</span>`}
+      </div>
+      <div>
+        <div style="font-size:15px;font-weight:600">${esc(player.name)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${cat?cat.icon+' '+cat.label:''} &bull; ${esc(player.role||'')}</div>
+      </div>
+    </div>
+    <div style="font-size:11px;font-weight:500;color:var(--muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Where should this player go?</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-full pass-action-btn" onclick="closeModal();doSkip()" style="text-align:left;padding:14px 16px;border-radius:var(--radius-sm)">
+        <div style="font-size:15px;margin-bottom:1px">⏭ Skip — move to next player</div>
+        <div style="font-size:12px;color:var(--muted);font-weight:400">This player moves to the end of the queue</div>
       </button>
-      ${catOptions?`<div style="padding:12px 16px;border:.5px solid var(--border);border-radius:var(--radius-sm)">
-        <div style="font-weight:500;margin-bottom:8px">Move to different category</div>
-        <select id="move-cat-select" style="margin-bottom:8px">${catOptions}</select>
-        <button class="btn btn-primary btn-sm" onclick="doMoveCategoryAndSkip()">Move & skip</button>
+      ${catOptions?`
+      <div style="padding:14px 16px;border:.5px solid var(--border);border-radius:var(--radius-sm);background:var(--card-bg)">
+        <div style="font-size:14px;font-weight:500;margin-bottom:8px">📂 Move to different category</div>
+        <select id="move-cat-select" style="margin-bottom:10px;font-size:13px">${catOptions}</select>
+        <button class="btn btn-primary btn-sm" onclick="doMoveCategoryAndSkip()" style="width:100%">Move & skip →</button>
       </div>`:''}
     </div>
-    <div class="form-actions" style="margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button></div>`);
+    <div style="display:flex;justify-content:flex-end;margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button></div>`);
 };
 
 window.doMarkUnsold      = () => { const t=currentTournament();if(!t)return;const a=t.auction,pid=a.currentPlayerId,q=a.queue||[],idx=q.indexOf(pid);if(idx!==-1)q.splice(idx,1);q.push(pid);a.queue=q;advanceQueue(t); };
@@ -2034,62 +1896,31 @@ function renderResults() {
     .filter(x=>x.player&&x.team)
     .sort((a,b)=>b.price-a.price);
 
-  const top3 = allSold.slice(0,3);
-  const rest = allSold.slice(3,10);
+  const top10 = allSold.slice(0, 10);
 
-  // Podium for top 3
-  const podiumHtml = top3.length ? `
-  <div class="results-podium">
-    ${[top3[1], top3[0], top3[2]].map((entry,pos) => {
-      if (!entry) return `<div class="podium-slot"></div>`;
-      const {player:p, team:tm, price} = entry;
-      const realRank = pos===0?2:pos===1?1:3;
-      const medal=['🥇','🥈','🥉'][realRank-1];
-      const heights=['180px','210px','160px'];
-      const photoSrc = p.photoLocal||p.photo||'';
-      const cat = (t.categories||[]).find(c=>c.id===p.categoryId);
-      return `<div class="podium-slot">
-        <div class="podium-player" style="${realRank===1?'transform:scale(1.05)':''}">
-          <div style="font-size:28px;margin-bottom:6px;text-align:center">${medal}</div>
-          <div style="width:64px;height:64px;border-radius:50%;overflow:hidden;background:var(--bg);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;border:3px solid ${realRank===1?'var(--amber)':realRank===2?'#aaa':'#cd7f32'}">
-            ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
-              `<span style="font-size:20px;font-weight:700;color:var(--muted)">${initials(p.name)}</span>`}
-          </div>
-          <div style="font-size:13px;font-weight:700;text-align:center;margin-bottom:3px">${esc(p.name)}</div>
-          ${cat?`<div style="text-align:center;margin-bottom:4px"><span class="cat-badge" style="background:${cat.color}22;color:${cat.color};font-size:10px">${cat.icon} ${esc(cat.label)}</span></div>`:''}
-          <div style="font-size:16px;font-weight:700;color:var(--green);text-align:center">${fmt(price)}</div>
-          <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:2px">${esc(tm.name)}</div>
-        </div>
-        <div class="podium-base" style="height:${heights[pos]};background:${realRank===1?'linear-gradient(180deg,var(--amber),#b8860b)':realRank===2?'linear-gradient(180deg,#ccc,#888)':'linear-gradient(180deg,#cd7f32,#8b4513)'}">
-          <span style="color:#fff;font-size:22px;font-weight:900;opacity:.6">${realRank}</span>
-        </div>
-      </div>`;
-    }).join('')}
-  </div>` : '';
-
-  // Ranks 4-10
-  const leaderRest = rest.length ? `
+  const leaderboardHtml = top10.length ? `
   <div class="card" style="margin-bottom:24px">
-    <div class="card-title">Most expensive players</div>
-    ${rest.map(({player:p,team:tm,price},i) => {
-      const rank = i+4;
-      const cat = (t.categories||[]).find(c=>c.id===p.categoryId);
-      const photoSrc = p.photoLocal||p.photo||'';
-      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:.5px solid var(--border);${i===rest.length-1?'border:none':''}">
-        <div style="font-size:13px;font-weight:700;color:var(--muted);width:24px;text-align:center;flex-shrink:0">${rank}</div>
-        <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--muted)">
-          ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:initials(p.name)}
+    <div class="card-title">🏆 Top 10 Most Expensive Players</div>
+    ${top10.map(({player:p,team:tm,price},i)=>{
+      const cat=(t.categories||[]).find(c=>c.id===p.categoryId);
+      const photoSrc=p.photoLocal||p.photo||'';
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':null;
+      return `<div style="display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:.5px solid var(--border);${i===top10.length-1?'border:none':''};cursor:pointer" onclick="showPlayerModal('${p.id}')">
+        <div style="font-size:${medal?'22px':'13px'};font-weight:700;color:var(--muted);width:30px;text-align:center;flex-shrink:0">${medal||i+1}</div>
+        <div style="width:40px;height:40px;border-radius:50%;overflow:hidden;background:var(--bg);flex-shrink:0;display:flex;align-items:center;justify-content:center;border:2px solid ${cat?cat.color:'var(--border)'}">
+          ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+            `<span style="font-size:13px;font-weight:600;color:var(--muted)">${initials(p.name)}</span>`}
         </div>
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:600">${esc(p.name)}</div>
-          <div style="font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center;margin-top:1px">
+          <div style="font-size:11px;color:var(--muted);display:flex;gap:6px;align-items:center;margin-top:2px">
             ${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color};font-size:10px">${cat.icon} ${esc(cat.label)}</span>`:''}
             ${esc(p.role||'')}
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">
-          <div style="font-size:14px;font-weight:700;color:var(--green)">${fmt(price)}</div>
-          <div style="font-size:11px;color:var(--muted)">${esc(tm.name)}</div>
+          <div style="font-size:16px;font-weight:700;color:var(--green)">${fmt(price)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:1px">${esc(tm.name)}</div>
         </div>
       </div>`;
     }).join('')}
@@ -2120,12 +1951,7 @@ function renderResults() {
       <button class="btn btn-primary btn-sm" onclick="exportAllPDF()">⬇ All teams PDF</button>
     </div>
   </div>
-  ${top3.length ? `
-  <div class="card" style="margin-bottom:24px;overflow:visible">
-    <div class="card-title">🏆 Top 3 most expensive</div>
-    ${podiumHtml}
-  </div>` : ''}
-  ${leaderRest}
+  ${leaderboardHtml}
   ${!t.teams.length?`<div class="empty">No teams yet.</div>`:t.teams.map(tm=>renderTeamResult(t,tm)).join('')}`;
 }
 function renderTeamResult(t,tm) {
@@ -2190,13 +2016,59 @@ function showModal(title, bodyHtml) {
 window.closeModal = () => document.getElementById('modal-overlay').classList.add('hidden');
 document.getElementById('modal-overlay').addEventListener('click', e => { if(e.target===document.getElementById('modal-overlay'))e.stopPropagation(); });
 
+// ── Player stats modal (click any player anywhere) ────────
+window.showPlayerModal = function(playerId, tourId) {
+  const t = tourId ? state.tournaments.find(x=>x.id===tourId) : currentTournament();
+  if (!t) return;
+  const p = (t.players||[]).find(x=>x.id===playerId); if (!p) return;
+  const cat = (t.categories||[]).find(c=>c.id===p.categoryId);
+  const soldInfo = (t.auction.sold||{})[p.id];
+  const soldTeam = soldInfo ? (t.teams||[]).find(tm=>tm.id===soldInfo.teamId) : null;
+  const photoSrc = p.photoLocal||p.photo||'';
+
+  // Kick off stats fetch if needed
+  if (p.userId && !statsCache[p.userId]) { statsCache[p.userId]='loading'; fetchPlayerStats(p.userId); }
+
+  const statsSectionHtml = p.userId ? renderStatsSection(p.userId) : `<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px 0">No CricHeroes profile linked</div>`;
+
+  showModal(p.name, `
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="width:80px;height:80px;border-radius:50%;overflow:hidden;background:var(--bg);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;border:3px solid ${cat?cat.color:'var(--border)'}">
+        ${photoSrc?`<img src="${photoSrc}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'"/>`:
+          `<span style="font-size:28px;font-weight:700;color:var(--muted)">${initials(p.name)}</span>`}
+      </div>
+      <div style="font-size:18px;font-weight:700;margin-bottom:4px">${esc(p.name)}</div>
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-bottom:8px">
+        ${cat?`<span class="cat-badge" style="background:${cat.color}22;color:${cat.color}">${cat.icon} ${esc(cat.label)}</span>`:''}
+        ${p.role?`<span class="cat-badge" style="background:var(--bg);color:var(--muted)">${esc(p.role)}</span>`:''}
+        ${p.country?`<span class="cat-badge" style="background:var(--bg);color:var(--muted)">🌍 ${esc(p.country)}</span>`:''}
+      </div>
+      ${soldTeam?`<div style="display:inline-flex;align-items:center;gap:6px;background:var(--green-light);border-radius:20px;padding:4px 12px;font-size:12px;color:var(--green-dark);font-weight:600">✓ Sold to ${esc(soldTeam.name)} for ${fmt(soldInfo.price)}</div>`:
+        cat?`<div style="font-size:12px;color:var(--muted)">Base price: ${fmt(cat.basePrice)}</div>`:''}
+    </div>
+    ${p.bio?`<div style="font-size:13px;color:var(--muted);background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;line-height:1.6">${esc(p.bio)}</div>`:''}
+    <div id="player-modal-stats-${p.id}">${statsSectionHtml}</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn" onclick="closeModal()">Close</button></div>`);
+
+  // If stats were loading, patch them in once ready
+  if (p.userId && statsCache[p.userId] === 'loading') {
+    const origFetch = fetchPlayerStats;
+    const pollStats = setInterval(() => {
+      if (!statsCache[p.userId] || statsCache[p.userId]==='loading') return;
+      clearInterval(pollStats);
+      const box = document.getElementById(`player-modal-stats-${p.id}`);
+      if (box) box.innerHTML = renderStatsSection(p.userId);
+    }, 200);
+    setTimeout(()=>clearInterval(pollStats), 15000);
+  }
+};
+
 // ── Shared ────────────────────────────────────────────────
 function showErr(el, msg) { if(el){el.textContent=msg;el.style.display='block';} }
 window.doLogout = () => {
   stopAllListeners();
   state.currentUserId = null;
   state.currentTournamentId = null;
-  loginMode = 'admin';
   currentPage = 'login';
   statsCache = {};
   statsOpenUsers.clear();
